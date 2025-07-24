@@ -6,9 +6,8 @@ from ta.trend import SMAIndicator
 
 st.set_page_config(page_title="Top 10 Crypto Signal Bot", layout="wide")
 st.title("Top 10 Krypto Signal Bot (CryptoCompare)")
-st.caption("Signale & Wahrscheinlichkeiten für die 10 größten Coins nach Marktkapitalisierung. Keine Finanzberatung!")
+st.caption("Alle Signale & Wahrscheinlichkeiten für die 10 größten Coins auf einen Klick. Keine Finanzberatung!")
 
-# Top 10 Coins laut CoinMarketCap (2024-07): Symbol: Name
 TOP10 = {
     "BTC": "Bitcoin",
     "ETH": "Ethereum",
@@ -52,21 +51,23 @@ def get_signal_and_probability(df):
     else:
         return 'ABWARTEN ⏳', 0
 
-with st.form("signal_form"):
-    coin = st.selectbox("Wähle eine Kryptowährung:", options=list(TOP10.keys()), format_func=lambda x: f"{x} – {TOP10[x]}")
-    submitted = st.form_submit_button("Signal abfragen")
-    if submitted:
+if st.button("Alle Top 10 Krypto-Signale anzeigen"):
+    for coin, name in TOP10.items():
+        st.markdown(f"### {name} ({coin}/USD)")
         df = fetch_ohlcv(symbol=coin, currency="USD")
         signal, prob = get_signal_and_probability(df)
-        st.subheader(f"{TOP10[coin]} ({coin}/USD) – Aktuelles Signal: {signal}")
+        st.write(f"**Signal:** {signal}")
         if signal == "KAUFEN 🚀":
             st.metric("Kaufen-Wahrscheinlichkeit", f"{prob} %")
         elif signal == "VERKAUFEN ⚠️":
             st.metric("Verkaufen-Wahrscheinlichkeit", f"{prob} %")
         if df is not None and len(df) > 0:
             st.line_chart(df.set_index('timestamp')['close'])
-            st.write("Letzte Aktualisierung:", pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"))
+            st.write("Letzte Aktualisierung:", pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'))
         else:
             st.warning("Keine oder zu wenige Preisdaten vorhanden!")
+        st.divider()
+else:
+    st.info("Klicke auf den Button, um alle aktuellen Top-10-Signale zu erhalten.")
 
 st.caption("Dieses Tool ist rein informativ und trifft keine Anlageentscheidung.")
