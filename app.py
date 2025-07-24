@@ -8,11 +8,21 @@ from ta.volatility import BollingerBands
 from ta.volume import OnBalanceVolumeIndicator
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="ETH Backtest Multi-Indikator", layout="wide")
-st.title("ETH/USD Backtest: Kombinierte Kaufsignale aus mehreren Indikatoren (letzte 5 Jahre)")
-st.caption("Alle Indikatoren liefern ein Teilsignal. Das endgültige Signal ist das Mehrheitsvotum aller. Es wird getestet, wie viele Kaufsignale nachträglich richtig waren.")
+st.set_page_config(page_title="ETH Backtest Feintuning", layout="wide")
+st.title("ETH/USD Backtest: Multi-Indikator – Feintuning & Treffer-Statistik")
 
-# 1. Hole historische ETH/USD-Daten (CryptoCompare API, Tagesdaten, 5 Jahre)
+# --- Parameter-Steuerung
+col1, col2, col3 = st.columns(3)
+with col1:
+    min_votes = st.slider("Minimale Indikator-Votes für Kaufsignal", 2, 7, 3)
+with col2:
+    rsi_buy = st.slider("RSI-Schwelle (drunter = kaufen)", 20, 50, 40)
+    cci_buy = st.slider("CCI-Schwelle (drunter = kaufen)", -200, 0, -80)
+with col3:
+    profit_thresh = st.slider("Backtest: Ziel-Gewinn (%)", 1, 30, 5)
+    holding_days = st.slider("Backtest: Haltedauer (Tage)", 5, 90, 30)
+
+# --- Daten holen (CryptoCompare)
 @st.cache_data(show_spinner=True)
 def fetch_data():
     url = "https://min-api.cryptocompare.com/data/v2/histoday"
@@ -31,86 +41,76 @@ def fetch_data():
 
 df = fetch_data()
 
-# 2. Berechne Indikatoren
+# --- Indikatoren
 def calc_indicators(df):
     df = df.copy()
-    # SMA/EMA
     df['sma20'] = SMAIndicator(df['close'], 20).sma_indicator()
     df['ema20'] = EMAIndicator(df['close'], 20).ema_indicator()
-    # MACD
     macd = MACD(df['close'])
     df['macd'] = macd.macd()
     df['macd_signal'] = macd.macd_signal()
-    # RSI
     df['rsi14'] = RSIIndicator(df['close'], 14).rsi()
-    # Stochastic
     stoch = StochasticOscillator(df['close'], df['close'], df['close'])
     df['stoch_k'] = stoch.stoch()
     df['stoch_d'] = stoch.stoch_signal()
-    # Bollinger Bands
     bb = BollingerBands(df['close'])
     df['bb_high'] = bb.bollinger_hband()
     df['bb_low'] = bb.bollinger_lband()
-    # OBV (mit Dummy-Volumen, da CryptoCompare kein Volumen liefert)
     df['obv'] = OnBalanceVolumeIndicator(df['close'], volume=np.ones(len(df))).on_balance_volume()
-    # CCI
     df['cci'] = CCIIndicator(df['close'], df['close'], df['close'], 20).cci()
     return df
 
 df = calc_indicators(df)
 
-# 3. Signalregeln pro Indikator (7 Indikatoren)
-def get_signals(df):
+# --- Signals/Regeln mit anpassbaren Schwellen
+def get_signals(df, min_votes, rsi_buy, cci_buy):
     signals = []
     for idx, row in df.iterrows():
         votes = 0
-        # SMA/EMA
         if row['close'] > row['sma20']: votes += 1
         if row['close'] > row['ema20']: votes += 1
-        # MACD
         if row['macd'] > row['macd_signal']: votes += 1
-        # RSI
-        if row['rsi14'] < 35: votes += 1
-        # Stochastic
+        if row['rsi14'] < rsi_buy: votes += 1
         if row['stoch_k'] < 20 and row['stoch_k'] > row['stoch_d']: votes += 1
-        # Bollinger: Preis unter Band = Kaufzone
         if row['close'] < row['bb_low']: votes += 1
-        # CCI
-        if row['cci'] < -100: votes += 1
-        # Wenn mindestens 4 von 7 Kriterien erfüllt: Kaufsignal
-        signals.append(1 if votes >= 4 else 0)
+        if row['cci'] < cci_buy: votes += 1
+        signals.append(1 if votes >= min_votes else 0)
     df['buy_signal'] = signals
     return df
 
-df = get_signals(df)
+df = get_signals(df, min_votes, rsi_buy, cci_buy)
 
-# 4. Backtest-Logik: Kaufsignal → Check ob +5% in den nächsten 30 Tagen
-def backtest(df, profit_threshold=0.05, holding_days=30):
-    buy_dates = df[df['buy_signal'] == 1].index
-    results = []
-    for dt in buy_dates:
-        idx = df.index.get_loc(dt)
-        future_idx = min(idx + holding_days, len(df) - 1)
-        buy_price = df.iloc[idx]['close']
-        max_future = df.iloc[idx+1:future_idx+1]['close'].max()
-        if max_future >= buy_price * (1 + profit_threshold):
-            results.append(True)
-        else:
-            results.append(False)
-    if len(results) == 0:
-        return 0, 0, []
-    hitrate = 100 * np.sum(results) / len(results)
-    return len(results), round(hitrate,1), buy_dates[results]
+# --- Backtest
+def backtest(df, profit_threshold, holding_days):
+    buy_rows = df[df['buy_signal'] == 1]
+    records = []
+    for idx, (dt, row) in enumerate(buy_rows.iterrows()):
+        df_idx = df.index.get_loc(dt)
+        future_idx = min(df_idx + holding_days, len(df) - 1)
+        buy_price = row['close']
+        sell_max = df.iloc[df_idx+1:future_idx+1]['close'].max()
+        reached = (sell_max >= buy_price * (1 + profit_threshold/100))
+        records.append({
+            'Kaufdatum': dt,
+            'Kurs (Kauf)': round(buy_price,2),
+            'Max. Kurs (Haltedauer)': round(sell_max,2),
+            'Erreicht?': '✔️' if reached else '❌',
+            'Gewinn (%)': round((sell_max/buy_price - 1)*100, 2)
+        })
+    if not records:
+        return pd.DataFrame(), 0
+    df_hits = pd.DataFrame(records)
+    hitrate = 100 * (df_hits['Erreicht?'] == '✔️').sum() / len(df_hits)
+    return df_hits, hitrate
 
-num_signals, hitrate, hit_dates = backtest(df)
+df_hits, hitrate = backtest(df, profit_thresh, holding_days)
 
-# 5. Plotten
+# --- Visualisierung
 st.line_chart(df['close'], use_container_width=True)
-st.markdown(f"**Gefundene Kaufsignale (letzte 5 Jahre):** {num_signals}")
-st.markdown(f"**Davon richtig (max +5% in 30 Tagen):** {hitrate} %")
+st.markdown(f"**Gefundene Kaufsignale:** {len(df_hits)}")
+st.markdown(f"**Trefferquote (+{profit_thresh}% in {holding_days} Tagen):** {hitrate:.1f} %")
 st.write("Grüne Punkte = Kaufsignal")
 
-# Signalpunkte im Chart markieren
 fig, ax = plt.subplots(figsize=(10,4))
 ax.plot(df.index, df['close'], label='ETH/USD')
 ax.scatter(df[df['buy_signal']==1].index, df[df['buy_signal']==1]['close'], color='lime', marker='o', label='Kaufsignal')
@@ -118,4 +118,10 @@ ax.set_title('ETH/USD + Kaufsignale')
 ax.legend()
 st.pyplot(fig)
 
-st.caption("Backtest: Ein Kaufsignal zählt als Treffer, wenn der Kurs danach innerhalb von 30 Tagen mindestens 5% steigt. Die Logik und Indikatoren sind ein einfaches Beispiel und keine Anlageberatung.")
+if len(df_hits) > 0:
+    st.markdown("### Signal- und Backtest-Tabelle")
+    st.dataframe(df_hits)
+else:
+    st.warning("Keine Kaufsignale gefunden – passe die Parameter an.")
+
+st.caption("Experimentiere mit Schwellenwerten, Votes, Gewinnziel & Haltedauer – so findest du bessere Strategien! Keine Finanzberatung.")
