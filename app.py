@@ -2,11 +2,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
-from ta.trend import SMAIndicator, EMAIndicator, MACD
+from ta.trend import SMAIndicator, EMAIndicator, MACD, CCIIndicator
 from ta.momentum import RSIIndicator, StochasticOscillator
 from ta.volatility import BollingerBands
 from ta.volume import OnBalanceVolumeIndicator
-from ta.others import CCIIndicator, WilliamsRIndicator
 
 st.set_page_config(page_title="ETH Backtest Multi-Indikator", layout="wide")
 st.title("ETH/USD Backtest: Kombinierte Kaufsignale aus mehreren Indikatoren (letzte 5 Jahre)")
@@ -49,36 +48,31 @@ def calc_indicators(df):
     df['bb_low'] = bb.bollinger_lband()
     # OBV
     df['obv'] = OnBalanceVolumeIndicator(df['close'], volume=np.ones(len(df))).on_balance_volume()
-    # CCI
+    # CCI (jetzt richtig importiert!)
     df['cci'] = CCIIndicator(df['close'], df['close'], df['close'], 20).cci()
-    # Williams %R
-    df['willr'] = WilliamsRIndicator(df['close'], df['close'], df['close'], 14).williams_r()
     return df
 
 df = calc_indicators(df)
 
-# 3. Signalregeln pro Indikator (VEREINFACHT)
+# 3. Signalregeln pro Indikator (7 Indikatoren)
 def get_signals(df):
     signals = []
     for idx, row in df.iterrows():
         votes = 0
-        crit = 0
         # SMA/EMA
         if row['close'] > row['sma20']: votes += 1
         if row['close'] > row['ema20']: votes += 1
         # MACD
         if row['macd'] > row['macd_signal']: votes += 1
         # RSI
-        if row['rsi14'] < 35: votes += 1  # stark überverkauft
+        if row['rsi14'] < 35: votes += 1
         # Stochastic
         if row['stoch_k'] < 20 and row['stoch_k'] > row['stoch_d']: votes += 1
         # Bollinger: Preis unter Band = Kaufzone
         if row['close'] < row['bb_low']: votes += 1
         # CCI
         if row['cci'] < -100: votes += 1
-        # Williams %R
-        if row['willr'] < -80: votes += 1
-        # Wenn mindestens 4 von 8 Kriterien erfüllt: Kaufsignal
+        # Wenn mindestens 4 von 7 Kriterien erfüllt: Kaufsignal
         signals.append(1 if votes >= 4 else 0)
     df['buy_signal'] = signals
     return df
