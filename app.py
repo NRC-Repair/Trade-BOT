@@ -3,9 +3,11 @@ import requests
 import pandas as pd
 from ta.momentum import RSIIndicator
 from ta.trend import SMAIndicator
+import time
 
 st.set_page_config(page_title="ETH Signal Bot", layout="centered")
 st.title("Ethereum Signal Bot (ETH/USD, CryptoCompare)")
+st.caption("Automatische Aktualisierung alle 60 Sekunden. Keine Finanzberatung!")
 
 def fetch_ohlcv():
     url = "https://min-api.cryptocompare.com/data/v2/histohour"
@@ -21,27 +23,9 @@ def fetch_ohlcv():
     df["close"] = df["close"].astype(float)
     return df
 
-def get_signal(df):
+def get_signal_and_probability(df):
     if len(df) < 21:
-        return "Zu wenig Daten!"
+        return "Zu wenig Daten!", 0
     sma = SMAIndicator(df['close'], window=20).sma_indicator()
     rsi = RSIIndicator(df['close'], window=14).rsi()
-    last_close = df['close'].iloc[-1]
-    last_sma = sma.iloc[-1]
-    last_rsi = rsi.iloc[-1]
-    if last_close > last_sma and last_rsi < 70:
-        return 'KAUFEN 🚀'
-    elif last_close < last_sma and last_rsi > 30:
-        return 'VERKAUFEN ⚠️'
-    else:
-        return 'ABWARTEN ⏳'
-
-if st.button("Signal abfragen"):
-    df = fetch_ohlcv()
-    signal = get_signal(df)
-    st.subheader(f"Aktuelles Signal: {signal}")
-    st.line_chart(df.set_index('timestamp')['close'])
-else:
-    st.info("Klicke auf den Button, um das aktuelle Signal zu holen.")
-
-st.caption("Dieses Tool ist rein informativ, keine Finanzberatung.")
+    last_close_
