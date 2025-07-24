@@ -1,25 +1,20 @@
 import streamlit as st
-import ccxt
+import requests
 import pandas as pd
 from ta.momentum import RSIIndicator
 from ta.trend import SMAIndicator
 
 st.set_page_config(page_title="ETH Signal Bot", layout="centered")
+st.title("Ethereum Signal Bot (ETH/USD, CoinGecko)")
 
-st.title("Ethereum Signal Bot (ETH/USDT)")
-st.write(
-    "Dieser Bot gibt dir ein einfaches Kauf-, Verkaufs- oder Abwarten-Signal für Ethereum "
-    "auf Basis von gleitendem Durchschnitt (SMA20) und RSI."
-)
-
-exchange = ccxt.binance()
-
-@st.cache_data(show_spinner=False)
-def fetch_ohlcv(symbol='ETH/USDT', timeframe='1h', limit=100):
-    ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-    df = pd.DataFrame(ohlcv, columns=['timestamp','open','high','low','close','volume'])
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df['close'] = df['close'].astype(float)
+def fetch_ohlcv():
+    url = "https://api.coingecko.com/api/v3/coins/ethereum/market_chart"
+    params = {"vs_currency": "usd", "days": "7", "interval": "hourly"}
+    data = requests.get(url, params=params).json()
+    prices = data["prices"]
+    df = pd.DataFrame(prices, columns=["timestamp", "close"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+    df["close"] = df["close"].astype(float)
     return df
 
 def get_signal(df):
