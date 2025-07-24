@@ -8,21 +8,18 @@ from ta.volatility import BollingerBands
 from ta.volume import OnBalanceVolumeIndicator
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="ETH Backtest Feintuning", layout="wide")
-st.title("ETH/USD Backtest: Multi-Indikator – Feintuning & Treffer-Statistik")
+st.set_page_config(page_title="ETH Signal Optimizer", layout="wide")
+st.title("ETH/USD: Automatisiertes Kaufsignal aus Backtest-Optimierung")
+st.caption("Die besten Schwellen werden automatisch aus der Vergangenheit gesucht. Das JETZT-Signal basiert auf dieser Statistik.")
 
-# --- Parameter-Steuerung
-col1, col2, col3 = st.columns(3)
+# --- Ziel-Parameter wählbar
+col1, col2 = st.columns(2)
 with col1:
-    min_votes = st.slider("Minimale Indikator-Votes für Kaufsignal", 2, 7, 3)
-with col2:
-    rsi_buy = st.slider("RSI-Schwelle (drunter = kaufen)", 20, 50, 40)
-    cci_buy = st.slider("CCI-Schwelle (drunter = kaufen)", -200, 0, -80)
-with col3:
     profit_thresh = st.slider("Backtest: Ziel-Gewinn (%)", 1, 30, 5)
+with col2:
     holding_days = st.slider("Backtest: Haltedauer (Tage)", 5, 90, 30)
 
-# --- Daten holen (CryptoCompare)
+# --- Daten holen
 @st.cache_data(show_spinner=True)
 def fetch_data():
     url = "https://min-api.cryptocompare.com/data/v2/histoday"
@@ -62,7 +59,7 @@ def calc_indicators(df):
 
 df = calc_indicators(df)
 
-# --- Signals/Regeln mit anpassbaren Schwellen
+# --- Optimierung: Grid Search für beste Parameter
 def get_signals(df, min_votes, rsi_buy, cci_buy):
     signals = []
     for idx, row in df.iterrows():
@@ -75,53 +72,62 @@ def get_signals(df, min_votes, rsi_buy, cci_buy):
         if row['close'] < row['bb_low']: votes += 1
         if row['cci'] < cci_buy: votes += 1
         signals.append(1 if votes >= min_votes else 0)
-    df['buy_signal'] = signals
-    return df
+    return np.array(signals)
 
-df = get_signals(df, min_votes, rsi_buy, cci_buy)
-
-# --- Backtest
-def backtest(df, profit_threshold, holding_days):
-    buy_rows = df[df['buy_signal'] == 1]
-    records = []
-    for idx, (dt, row) in enumerate(buy_rows.iterrows()):
-        df_idx = df.index.get_loc(dt)
-        future_idx = min(df_idx + holding_days, len(df) - 1)
-        buy_price = row['close']
-        sell_max = df.iloc[df_idx+1:future_idx+1]['close'].max()
+def backtest(df, signals, profit_threshold, holding_days):
+    buy_rows = df[signals == 1]
+    results = []
+    for dt in buy_rows.index:
+        idx = df.index.get_loc(dt)
+        future_idx = min(idx + holding_days, len(df) - 1)
+        buy_price = df.loc[dt]['close']
+        sell_max = df.iloc[idx+1:future_idx+1]['close'].max()
         reached = (sell_max >= buy_price * (1 + profit_threshold/100))
-        records.append({
-            'Kaufdatum': dt,
-            'Kurs (Kauf)': round(buy_price,2),
-            'Max. Kurs (Haltedauer)': round(sell_max,2),
-            'Erreicht?': '✔️' if reached else '❌',
-            'Gewinn (%)': round((sell_max/buy_price - 1)*100, 2)
-        })
-    if not records:
-        return pd.DataFrame(), 0
-    df_hits = pd.DataFrame(records)
-    hitrate = 100 * (df_hits['Erreicht?'] == '✔️').sum() / len(df_hits)
-    return df_hits, hitrate
+        results.append(reached)
+    if len(results) == 0:
+        return 0
+    hitrate = 100 * np.sum(results) / len(results)
+    return hitrate
 
-df_hits, hitrate = backtest(df, profit_thresh, holding_days)
+st.info("Optimiere: Voting-Schwelle, RSI und CCI… (wird berechnet, kann einige Sekunden dauern)")
 
-# --- Visualisierung
+best_hitrate = 0
+best_params = None
+
+# --- Parameterbereiche fürs Grid Search
+for min_votes in range(2, 6):
+    for rsi_buy in range(30, 51, 2):
+        for cci_buy in range(-150, -49, 10):
+            signals = get_signals(df, min_votes, rsi_buy, cci_buy)
+            hitrate = backtest(df, signals, profit_thresh, holding_days)
+            if hitrate > best_hitrate:
+                best_hitrate = hitrate
+                best_params = (min_votes, rsi_buy, cci_buy)
+
+min_votes, rsi_buy, cci_buy = best_params
+signals = get_signals(df, min_votes, rsi_buy, cci_buy)
+df['buy_signal'] = signals
+
+# --- Jetzt-Signal (letzter Tag)
+now_signal = int(signals[-1])
+now_status = "KAUFEN! 🚀" if now_signal == 1 else "Kein Kaufsignal"
+
+st.success(f"""
+**Optimale Parameter aus Backtest:**  
+Votes: {min_votes}, RSI < {rsi_buy}, CCI < {cci_buy}  
+**Backtest-Trefferquote:** {best_hitrate:.1f} % für +{profit_thresh}% in {holding_days} Tagen
+""")
+
+st.subheader(f"**Heutiges Signal:** {now_status}")
+
 st.line_chart(df['close'], use_container_width=True)
-st.markdown(f"**Gefundene Kaufsignale:** {len(df_hits)}")
-st.markdown(f"**Trefferquote (+{profit_thresh}% in {holding_days} Tagen):** {hitrate:.1f} %")
-st.write("Grüne Punkte = Kaufsignal")
 
+# Optional: Signalpunkte plotten
 fig, ax = plt.subplots(figsize=(10,4))
 ax.plot(df.index, df['close'], label='ETH/USD')
 ax.scatter(df[df['buy_signal']==1].index, df[df['buy_signal']==1]['close'], color='lime', marker='o', label='Kaufsignal')
-ax.set_title('ETH/USD + Kaufsignale')
+ax.set_title('ETH/USD + Kaufsignale (optimiert)')
 ax.legend()
 st.pyplot(fig)
 
-if len(df_hits) > 0:
-    st.markdown("### Signal- und Backtest-Tabelle")
-    st.dataframe(df_hits)
-else:
-    st.warning("Keine Kaufsignale gefunden – passe die Parameter an.")
-
-st.caption("Experimentiere mit Schwellenwerten, Votes, Gewinnziel & Haltedauer – so findest du bessere Strategien! Keine Finanzberatung.")
+st.caption("Das heutige Signal basiert auf den best-getroffenen Schwellen der Vergangenheit (Backtest-Optimierung). Keine Finanzberatung.")
