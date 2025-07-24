@@ -10,7 +10,15 @@ st.title("Ethereum Signal Bot (ETH/USD, CoinGecko)")
 def fetch_ohlcv():
     url = "https://api.coingecko.com/api/v3/coins/ethereum/market_chart"
     params = {"vs_currency": "usd", "days": "7", "interval": "hourly"}
-    data = requests.get(url, params=params).json()
+    response = requests.get(url, params=params)
+    if response.status_code != 200:
+        st.error(f"CoinGecko API-Fehler: {response.status_code}")
+        st.stop()
+    data = response.json()
+    # Debug: Zeige, welche Keys das Objekt hat
+    if "prices" not in data:
+        st.error(f"API Response enthält keine 'prices'. Antwort: {data}")
+        st.stop()
     prices = data["prices"]
     df = pd.DataFrame(prices, columns=["timestamp", "close"])
     df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
@@ -18,6 +26,8 @@ def fetch_ohlcv():
     return df
 
 def get_signal(df):
+    if len(df) < 21:
+        return "Zu wenig Daten!"
     sma = SMAIndicator(df['close'], window=20).sma_indicator()
     rsi = RSIIndicator(df['close'], window=14).rsi()
     last_close = df['close'].iloc[-1]
