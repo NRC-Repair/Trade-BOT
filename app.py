@@ -5,23 +5,19 @@ from ta.momentum import RSIIndicator
 from ta.trend import SMAIndicator
 
 st.set_page_config(page_title="ETH Signal Bot", layout="centered")
-st.title("Ethereum Signal Bot (ETH/USD, CoinGecko)")
+st.title("Ethereum Signal Bot (ETH/USD, CryptoCompare)")
 
 def fetch_ohlcv():
-    url = "https://api.coingecko.com/api/v3/coins/ethereum/market_chart"
-    params = {"vs_currency": "usd", "days": "7", "interval": "hourly"}
-    response = requests.get(url, params=params)
-    if response.status_code != 200:
-        st.error(f"CoinGecko API-Fehler: {response.status_code}")
+    url = "https://min-api.cryptocompare.com/data/v2/histohour"
+    params = {"fsym": "ETH", "tsym": "USD", "limit": 168}  # 1 Woche, 1-Stunden-Kerzen
+    r = requests.get(url, params=params)
+    data = r.json()
+    if "Data" not in data or "Data" not in data["Data"]:
+        st.error(f"API Fehler: {data}")
         st.stop()
-    data = response.json()
-    # Debug: Zeige, welche Keys das Objekt hat
-    if "prices" not in data:
-        st.error(f"API Response enthält keine 'prices'. Antwort: {data}")
-        st.stop()
-    prices = data["prices"]
-    df = pd.DataFrame(prices, columns=["timestamp", "close"])
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+    raw = data["Data"]["Data"]
+    df = pd.DataFrame(raw)
+    df["timestamp"] = pd.to_datetime(df["time"], unit="s")
     df["close"] = df["close"].astype(float)
     return df
 
