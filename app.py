@@ -6,20 +6,25 @@ from ta.trend import SMAIndicator, EMAIndicator, MACD, CCIIndicator
 from ta.momentum import RSIIndicator, StochasticOscillator
 from ta.volatility import BollingerBands
 from ta.volume import OnBalanceVolumeIndicator
+import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="ETH Backtest Multi-Indikator", layout="wide")
 st.title("ETH/USD Backtest: Kombinierte Kaufsignale aus mehreren Indikatoren (letzte 5 Jahre)")
 st.caption("Alle Indikatoren liefern ein Teilsignal. Das endgültige Signal ist das Mehrheitsvotum aller. Es wird getestet, wie viele Kaufsignale nachträglich richtig waren.")
 
-# 1. Hole historische ETH/USD-Daten (CoinGecko API, Tagesdaten, 5 Jahre)
+# 1. Hole historische ETH/USD-Daten (CryptoCompare API, Tagesdaten, 5 Jahre)
 @st.cache_data(show_spinner=True)
 def fetch_data():
-    url = "https://api.coingecko.com/api/v3/coins/ethereum/market_chart"
-    params = {"vs_currency": "usd", "days": "1825", "interval": "daily"}
+    url = "https://min-api.cryptocompare.com/data/v2/histoday"
+    params = {"fsym": "ETH", "tsym": "USD", "limit": 1825}
     r = requests.get(url, params=params)
     data = r.json()
-    df = pd.DataFrame(data['prices'], columns=['date', 'close'])
-    df['date'] = pd.to_datetime(df['date'], unit='ms')
+    if 'Data' not in data or 'Data' not in data['Data']:
+        st.error(f"Fehler: {data}")
+        st.stop()
+    raw = data['Data']['Data']
+    df = pd.DataFrame(raw)
+    df['date'] = pd.to_datetime(df['time'], unit='s')
     df.set_index('date', inplace=True)
     df['close'] = df['close'].astype(float)
     return df
@@ -46,9 +51,9 @@ def calc_indicators(df):
     bb = BollingerBands(df['close'])
     df['bb_high'] = bb.bollinger_hband()
     df['bb_low'] = bb.bollinger_lband()
-    # OBV
+    # OBV (mit Dummy-Volumen, da CryptoCompare kein Volumen liefert)
     df['obv'] = OnBalanceVolumeIndicator(df['close'], volume=np.ones(len(df))).on_balance_volume()
-    # CCI (jetzt richtig importiert!)
+    # CCI
     df['cci'] = CCIIndicator(df['close'], df['close'], df['close'], 20).cci()
     return df
 
@@ -106,7 +111,6 @@ st.markdown(f"**Davon richtig (max +5% in 30 Tagen):** {hitrate} %")
 st.write("Grüne Punkte = Kaufsignal")
 
 # Signalpunkte im Chart markieren
-import matplotlib.pyplot as plt
 fig, ax = plt.subplots(figsize=(10,4))
 ax.plot(df.index, df['close'], label='ETH/USD')
 ax.scatter(df[df['buy_signal']==1].index, df[df['buy_signal']==1]['close'], color='lime', marker='o', label='Kaufsignal')
